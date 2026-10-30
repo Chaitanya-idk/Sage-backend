@@ -1,0 +1,87 @@
+# SAGE Crop Registry Configuration
+# Single Source of Truth for Crop Checkpoints & Taxonomy
+default_hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+base_model: "Qwen/Qwen2.5-VL-3B-Instruct"
+
+crops:
+  corn:
+    display_name: "Corn (Maize)"
+    hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+    checkpoint_subpath: "corn_5ep/checkpoints/checkpoint-step-1000"
+    model_type: "peft_lora"
+    adapter_name: "corn_lora"
+    prompt_template: "Analyze this image of a corn plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    known_classes:
+      - "Bacterial_Rot_And_Blight"
+      - "Common_Rust"
+      - "Ear_Rots"
+      - "Gray_Leaf_Spot"
+      - "Leaf_Blight"
+      - "Maize_Lethal_Necrosis"
+      - "Maize_Streak_Virus"
+      - "Northern_Leaf_Blight"
+      - "Healthy"
+
+  rice:
+    display_name: "Rice"
+    hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+    checkpoint_subpath: "rice/checkpoints/checkpoint-step-600"
+    model_type: "peft_lora"
+    adapter_name: "rice_lora"
+    prompt_template: "Analyze this image of a rice plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    known_classes:
+      - "Bacterial_Leaf_Blight"
+      - "Blast"
+      - "Brown_Spot"
+      - "Tungro"
+      - "Healthy"
+
+  soybean:
+    display_name: "Soybean"
+    hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+    checkpoint_subpath: "soybean_5ep/checkpoints/checkpoint-step-1000"
+    model_type: "peft_lora"
+    adapter_name: "soybean_lora"
+    prompt_template: "Analyze this image of a soybean plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    known_classes:
+      - "Bacterial_Blight"
+      - "Bacterial_Pustule"
+      - "Brown_Spot"
+      - "Frogeye_Leaf_Spot"
+      - "Fusarium_Disease"
+      - "Herbicide_Injury"
+      - "Iron_Deficiency_Chlorosis"
+      - "Potassium_Deficiency"
+      - "Healthy"
+
+  tomato:
+    display_name: "Tomato"
+    hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+    checkpoint_subpath: "tomato/checkpoints/checkpoint-step-600"
+    model_type: "peft_lora"
+    adapter_name: "tomato_lora"
+    prompt_template: "Analyze this image of a tomato plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    known_classes:
+      - "Bacterial_Leaf_Spot"
+      - "Early_Blight"
+      - "Late_Blight"
+      - "Leaf_Mold"
+      - "Leaf_Mosaic_Virus"
+      - "Septoria_Leaf_Blotch"
+      - "Target_Spot"
+      - "Tomato_Leaf_Curl_Virus"
+      - "Healthy"
+
+  wheat:
+    display_name: "Wheat"
+    hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
+    checkpoint_subpath: "wheat/checkpoints/checkpoint-step-500"
+    model_type: "peft_lora"
+    adapter_name: "wheat_lora"
+    prompt_template: "Analyze this image of a wheat plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    known_classes:
+      - "Root_Rot"
+      - "Rust"
+      - "Septoria_Leaf_Blotch"
+      - "Smut"
+      - "Healthy"
