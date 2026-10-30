@@ -135,3 +135,4 @@ def create_application() -> FastAPI:
 
 # Export application instance
 app = create_application()
+

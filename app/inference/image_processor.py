@@ -73,3 +73,4 @@ class ImageProcessor:
         except Exception as e:
             logger.error("Image preprocessing error: %s", str(e))
             raise ValueError(f"Failed to process image: {e}") from e
+

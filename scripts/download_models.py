@@ -69,3 +69,4 @@ def download_all(cache_dir: str = "models_cache"):
 if __name__ == "__main__":
     success = download_all()
     sys.exit(0 if success else 1)
+

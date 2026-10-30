@@ -25,3 +25,4 @@ async def get_health() -> HealthResponse:
         base_model_loaded=status.base_model_loaded,
         active_crop=status.active_crop,
     )
+

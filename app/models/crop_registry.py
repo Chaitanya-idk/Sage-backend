@@ -101,3 +101,4 @@ class CropRegistry:
 
 # Global singleton crop registry instance
 crop_registry = CropRegistry()
+

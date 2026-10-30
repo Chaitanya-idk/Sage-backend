@@ -301,3 +301,4 @@ def get_model_manager() -> ModelManager:
     if _model_manager_instance is None:
         _model_manager_instance = ModelManager()
     return _model_manager_instance
+

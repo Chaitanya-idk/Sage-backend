@@ -108,3 +108,4 @@ async def validate_image_file(file: UploadFile) -> bytes:
         )
 
     return content
+

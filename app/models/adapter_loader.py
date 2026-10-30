@@ -125,3 +125,4 @@ class AdapterLoader:
                 logger.warning("Could not parse adapter_config.json in %s: %s", checkpoint_dir, str(e))
 
         return metadata
+

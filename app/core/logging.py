@@ -56,3 +56,4 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     """Get a named logger with sensitive data protection."""
     logger = logging.getLogger(name or "sage")
     return logger
+

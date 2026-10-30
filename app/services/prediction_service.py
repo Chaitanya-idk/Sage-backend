@@ -155,3 +155,4 @@ def get_prediction_service() -> PredictionService:
     if _service_instance is None:
         _service_instance = PredictionService()
     return _service_instance
+

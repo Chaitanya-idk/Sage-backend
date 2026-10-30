@@ -111,3 +111,4 @@ class ErrorResponse(BaseModel):
 
     detail: str
     error_type: Optional[str] = None
+

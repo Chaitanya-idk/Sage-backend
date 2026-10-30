@@ -87,3 +87,4 @@ class ResponseParser:
             is_canonical_match=is_canonical,
             attributes=extracted,
         )
+

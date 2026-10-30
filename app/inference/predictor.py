@@ -197,3 +197,4 @@ def get_predictor() -> Predictor:
     if _predictor_instance is None:
         _predictor_instance = Predictor()
     return _predictor_instance
+

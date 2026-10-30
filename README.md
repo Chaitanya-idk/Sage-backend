@@ -408,3 +408,4 @@ console.log(result.prediction);
 | `Unsupported image type` | Uploaded image format is not supported | Supported formats: JPEG, PNG, WebP, BMP, TIFF. |
 | `413 Request Entity Too Large` | Image file exceeds `MAX_IMAGE_SIZE_MB` (default: 10MB) | Compress image or increase `MAX_IMAGE_SIZE_MB` in `.env`. |
 | `Tunnel connection refused / 502` | Server has not finished loading base model | Check `/health` endpoint to ensure `base_model_loaded: true` before sending prediction traffic. |
+
