@@ -44,11 +44,13 @@ class TestMockInference(unittest.TestCase):
         result = self.service.predict_single(
             crop="tomato",
             image_bytes=self.sample_image_bytes,
+            prompt="Identify disease and explain symptoms.",
         )
         self.assertTrue(result.success)
         self.assertEqual(result.crop, "tomato")
-        self.assertEqual(result.model, settings.base_model)
-        self.assertIsNotNone(result.prediction.class_name)
+        self.assertEqual(result.base_model, settings.base_model)
+        self.assertEqual(result.input.prompt, "Identify disease and explain symptoms.")
+        self.assertIsNotNone(result.prediction.response)
         self.assertGreater(result.inference_time_seconds, 0)
 
     def test_batch_mock_prediction(self):
@@ -60,6 +62,7 @@ class TestMockInference(unittest.TestCase):
         summary = self.service.predict_batch(
             crop="rice",
             images=batch,
+            prompt="Detect any leaf blast or blight.",
         )
         self.assertEqual(summary.total_images, 2)
         self.assertEqual(summary.successful_count, 2)
@@ -67,6 +70,7 @@ class TestMockInference(unittest.TestCase):
         self.assertEqual(summary.crop, "rice")
         self.assertEqual(len(summary.results), 2)
         self.assertTrue(summary.results[0].success)
+        self.assertEqual(summary.results[0].input.get("prompt"), "Detect any leaf blast or blight.")
 
     def test_invalid_crop_rejection(self):
         """Ensure unmapped crop yields descriptive ValueError."""
@@ -79,4 +83,3 @@ class TestMockInference(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

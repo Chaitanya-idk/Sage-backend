@@ -1,305 +1,146 @@
 # SAGE – Autonomous Visual AI Agent for Precision Agriculture
-## Multi-Crop Vision AI Inference API Backend
+## Multimodal Image + Text Vision AI Inference API Backend
 
 Production-grade, modular FastAPI inference backend serving crop disease diagnoses using **Qwen2.5-VL-3B-Instruct** combined with crop-specific Parameter-Efficient Fine-Tuned (PEFT) LoRA adapters.
+
+Supports **multimodal inputs (Image + Text prompt)**:
+1. **Crop name** -> Activates the corresponding crop LoRA adapter.
+2. **Plant image** -> Visual evidence processed natively by Qwen vision processor.
+3. **User prompt / instruction (Optional)** -> Custom query directing the model's diagnostic focus (e.g. disease ID, symptom explanation, severity, management advice).
 
 Designed for cloud GPU instances such as **Kaggle Notebooks (Tesla T4 / P100)** and **Google Colab**, exposed externally through an encrypted high-speed tunnel.
 
 ---
 
 ## Table of Contents
-1. [Project Overview](#project-overview)
-2. [Model & Adapter Architecture](#model--adapter-architecture)
-3. [Hugging Face Repository Structure](#hugging-face-repository-structure)
-4. [Central Crop Registry & Taxonomy](#central-crop-registry--taxonomy)
-5. [Repository Structure](#repository-structure)
-6. [Single vs. Multi-Adapter Modes](#single-vs-multi-adapter-modes)
-7. [Local Testing without Model Downloads (Mock Mode)](#local-testing-without-model-downloads-mock-mode)
-8. [Kaggle Deployment Guide (Primary Target)](#kaggle-deployment-guide-primary-target)
-9. [Google Colab Deployment Guide](#google-colab-deployment-guide)
-10. [REST API Documentation & Endpoints](#rest-api-documentation--endpoints)
-11. [Working cURL Examples](#working-curl-examples)
-12. [n8n Workflow Integration](#n8n-workflow-integration)
-13. [External App Integration (Python & JavaScript)](#external-app-integration-python--javascript)
-14. [GPU Memory & Performance Optimization](#gpu-memory--performance-optimization)
-15. [Troubleshooting & Common Errors](#troubleshooting--common-errors)
+1. [Multimodal Architecture Overview](#multimodal-architecture-overview)
+2. [Hugging Face Checkpoint Mapping](#hugging-face-checkpoint-mapping)
+3. [Crop Registry & Default Prompts](#crop-registry--default-prompts)
+4. [Flexible User Prompts & Limitations](#flexible-user-prompts--limitations)
+5. [Primary API Endpoints & Request Parameters](#primary-api-endpoints--request-parameters)
+6. [Structured JSON Response Format](#structured-json-response-format)
+7. [Working cURL Examples](#working-curl-examples)
+8. [n8n Workflow Integration](#n8n-workflow-integration)
+9. [External Application Integration](#external-application-integration)
+10. [Adapter Switching & Concurrency Synchronization](#adapter-switching--concurrency-synchronization)
+11. [Kaggle & Colab Deployment Guides](#kaggle--colab-deployment-guides)
+12. [Testing & Mock Mode](#testing--mock-mode)
 
 ---
 
-## Project Overview
+## Multimodal Architecture Overview
 
-SAGE (**Scalable Agentic Grounded Evaluation for Crop Disease Diagnosis**) delivers grounded visual diagnostics for precision agriculture. Rather than using generic classification models that only predict an index label, SAGE leverages a fine-tuned Vision-Language Model (**Qwen2.5-VL-3B-Instruct**) to inspect leaf and plant imagery and generate grounded, multi-field diagnoses:
-- **Crop**: Target host plant
-- **Diagnosis**: Specific disease or condition name
-- **Disease Type**: Fungal, Bacterial, Viral, Deficiency, or Pest
-- **Plant Organ**: Foliar, Vascular, Fruit, Stem, or Root
-- **Visual Symptoms**: Grounded visual description of symptoms
-- **Pathogen**: Causative biological organism
-
----
-
-## Model & Adapter Architecture
-
-| Component | Specification |
-| :--- | :--- |
-| **Base Model** | `Qwen/Qwen2.5-VL-3B-Instruct` |
-| **Adapter Format** | PEFT LoRA (`adapter_model.safetensors`, `adapter_config.json`) |
-| **LoRA Rank ($r$)** | 16 |
-| **LoRA Alpha ($\alpha$)** | 32 |
-| **LoRA Dropout** | 0.05 |
-| **Target Modules** | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` |
-| **Inference Precision** | Automatic BF16 / FP16 detection (`torch.bfloat16` if supported, else `torch.float16`) |
-| **Base Model Loading** | **Loaded once** into VRAM at startup via FastAPI lifespan |
+SAGE leverages the native multimodal capabilities of **Qwen2.5-VL-3B-Instruct**:
+- **Base Model**: Loaded into GPU memory **only once** upon server startup.
+- **Crop Adapters**: PEFT LoRA adapters dynamically attached from `IDK-Chaitanya/SAGE5Class-cp`.
+- **Multimodal Pipeline**:
+  ```mermaid
+  flowchart LR
+    A["Request: Crop + Image + Prompt"] --> B["Crop Registry Validation"]
+    B --> C["Activate Crop LoRA Adapter"]
+    A --> D["Image Normalization (RGB, EXIF)"]
+    C --> E["Qwen2.5-VL Multimodal Input: Messages [Image + Prompt]"]
+    D --> E
+    E --> F["AutoProcessor & Model Generate"]
+    F --> G["Token Slice & Output Parser"]
+    G --> H["Structured JSON Response"]
+  ```
 
 ---
 
-## Hugging Face Repository Structure
+## Hugging Face Checkpoint Mapping
 
 Hugging Face Checkpoints Repository: **`IDK-Chaitanya/SAGE5Class-cp`**
 
-The repository contains five dedicated checkpoint subdirectories:
-```
-IDK-Chaitanya/SAGE5Class-cp/
-├── corn_5ep/checkpoints/checkpoint-step-1000/
-│   ├── adapter_config.json
-│   ├── adapter_model.safetensors (~148 MB)
-│   ├── processor_config.json
-│   ├── tokenizer.json
-│   └── chat_template.jinja
-├── rice/checkpoints/checkpoint-step-600/
-│   ├── adapter_config.json
-│   └── adapter_model.safetensors
-├── soybean_5ep/checkpoints/checkpoint-step-1000/
-│   ├── adapter_config.json
-│   └── adapter_model.safetensors
-├── tomato/checkpoints/checkpoint-step-600/
-│   ├── adapter_config.json
-│   └── adapter_model.safetensors
-└── wheat/checkpoints/checkpoint-step-500/
-    ├── adapter_config.json
-    └── adapter_model.safetensors
-```
-
----
-
-## Central Crop Registry & Taxonomy
-
-Configured centrally in [`configs/crops.yaml`](file:///c:/Projects/Sage-backend/configs/crops.yaml):
-
-| Crop ID | Display Name | Checkpoint Subpath | Known Disease Classes |
+| Crop ID | Display Name | Checkpoint Subpath | Active Adapter |
 | :--- | :--- | :--- | :--- |
-| `corn` | Corn (Maize) | `corn_5ep/checkpoints/checkpoint-step-1000` | Bacterial Rot And Blight, Common Rust, Ear Rots, Gray Leaf Spot, Leaf Blight, Maize Lethal Necrosis, Maize Streak Virus, Northern Leaf Blight, Healthy |
-| `rice` | Rice | `rice/checkpoints/checkpoint-step-600` | Bacterial Leaf Blight, Blast, Brown Spot, Tungro, Healthy |
-| `soybean` | Soybean | `soybean_5ep/checkpoints/checkpoint-step-1000` | Bacterial Blight, Bacterial Pustule, Brown Spot, Frogeye Leaf Spot, Fusarium Disease, Herbicide Injury, Iron Deficiency Chlorosis, Potassium Deficiency, Healthy |
-| `tomato` | Tomato | `tomato/checkpoints/checkpoint-step-600` | Bacterial Leaf Spot, Early Blight, Late Blight, Leaf Mold, Leaf Mosaic Virus, Septoria Leaf Blotch, Target Spot, Tomato Leaf Curl Virus, Healthy |
-| `wheat` | Wheat | `wheat/checkpoints/checkpoint-step-500` | Root Rot, Rust, Septoria Leaf Blotch, Smut, Healthy |
-
-> **Training Metadata Note:** Grounded classes are derived from the companion dataset `IDK-Chaitanya/SAGE5class`. When the model generates diagnoses, the `ResponseParser` maps outputs to the canonical taxonomy while preserving the exact generated text. No artificial confidence logits or fabricated probabilities are generated.
+| `corn` | Corn (Maize) | `corn_5ep/checkpoints/checkpoint-step-1000` | `corn_lora` |
+| `rice` | Rice | `rice/checkpoints/checkpoint-step-600` | `rice_lora` |
+| `soybean` | Soybean | `soybean_5ep/checkpoints/checkpoint-step-1000` | `soybean_lora` |
+| `tomato` | Tomato | `tomato/checkpoints/checkpoint-step-600` | `tomato_lora` |
+| `wheat` | Wheat | `wheat/checkpoints/checkpoint-step-500` | `wheat_lora` |
 
 ---
 
-## Repository Structure
+## Crop Registry & Default Prompts
 
-```
-Sage-backend/
-├── configs/
-│   └── crops.yaml               # Single source of truth for crop checkpoints & taxonomy
-├── app/
-│   ├── __init__.py
-│   ├── main.py                  # FastAPI app factory, CORS, lifespan & error handlers
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── health.py            # GET /health
-│   │   ├── routes.py            # Prediction & status endpoints
-│   │   └── schemas.py           # Pydantic request & response contracts
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── config.py            # Pydantic BaseSettings & env resolution
-│   │   ├── logging.py           # Structured logging with token redaction
-│   │   └── security.py          # API key auth & image validation
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── crop_registry.py     # Crop catalog manager
-│   │   ├── adapter_loader.py    # HF Hub checkpoint downloader & inspector
-│   │   └── model_manager.py     # Model lifecycle & PEFT adapter manager
-│   ├── inference/
-│   │   ├── __init__.py
-│   │   ├── image_processor.py   # RGB normalization & EXIF orientation
-│   │   ├── response_parser.py   # SAGE structured output parser
-│   │   └── predictor.py         # End-to-end inference engine
-│   └── services/
-│       ├── __init__.py
-│       └── prediction_service.py # Decoupled prediction & batch coordinator
-├── notebooks/
-│   ├── kaggle_deployment.ipynb  # Primary 12-cell Kaggle deployment notebook
-│   └── colab_deployment.ipynb   # Google Colab deployment notebook
-├── scripts/
-│   ├── start_server.py          # Programmatic Uvicorn launcher
-│   ├── verify_checkpoints.py    # HF Hub checkpoint validation utility
-│   └── download_models.py       # Offline model pre-download script
-├── tests/
-│   ├── __init__.py
-│   ├── test_crop_registry.py    # Crop registry unit tests
-│   ├── test_schemas.py          # Schema & response parser tests
-│   ├── test_health.py           # Health endpoint tests
-│   └── test_mock_inference.py   # Complete pipeline mock test
-├── .env.example                 # Environment variables template
-├── .gitignore                   # Git exclusions (weights, tokens, caches)
-├── requirements.txt             # Pinned production dependencies
-├── Dockerfile                   # GPU containerization configuration
-└── README.md                    # Comprehensive documentation
-```
+Configured centrally in [`configs/crops.yaml`](file:///c:/Projects/Sage-backend/configs/crops.yaml). If the `prompt` parameter is omitted by the client, SAGE automatically injects the tailored default prompt for that crop:
+
+| Crop | Configured Default Prompt |
+| :--- | :--- |
+| **Corn** | `Identify the disease visible in this corn leaf image. Use the disease classes supported by the corn model. Provide the predicted disease and a concise explanation of the visible symptoms.` |
+| **Rice** | `Identify the disease visible in this rice leaf image. Use the disease classes supported by the rice model. Provide the predicted disease and a concise explanation of the visible symptoms.` |
+| **Soybean** | `Identify the disease visible in this soybean leaf image. Use the disease classes supported by the soybean model. Provide the predicted disease and a concise explanation of the visible symptoms.` |
+| **Tomato** | `Identify the disease visible in this tomato leaf image. Use the disease classes supported by the tomato model. Provide the predicted disease and a concise explanation of the visible symptoms.` |
+| **Wheat** | `Identify the disease visible in this wheat leaf image. Use the disease classes supported by the wheat model. Provide the predicted disease and a concise explanation of the visible symptoms.` |
 
 ---
 
-## Single vs. Multi-Adapter Modes
+## Flexible User Prompts & Limitations
 
-Configured via the environment variable `ADAPTER_MODE`:
+Clients can pass arbitrary user prompts to guide the vision-language reasoning:
+- **Disease Identification**: `"Identify the disease affecting this tomato leaf."`
+- **Symptom Explanation**: `"Describe the visible lesions and discoloration in this image."`
+- **Severity Assessment**: `"Assess the visible severity of the leaf infection."`
+- **Agricultural Advice**: `"Suggest suitable disease-management practices for the identified condition."`
 
-### 1. `ADAPTER_MODE=single` (Default & Recommended)
-- Loads the base model `Qwen2.5-VL-3B-Instruct` once into GPU memory.
-- Attaches **only one active crop adapter** at a time (~148 MB VRAM).
-- When another crop is requested:
-  - Safely detaches the previous adapter.
-  - Releases unused GPU cache via `torch.cuda.empty_cache()` and `gc.collect()`.
-  - Attaches the newly requested crop adapter.
-- **Benefits**: Minimizes VRAM (~7.5 GB total VRAM), runs reliably on 15 GB / 16 GB GPUs (Tesla T4) without memory fragmentation.
-- Thread-safe adapter switching lock prevents concurrent conflicts.
-
-### 2. `ADAPTER_MODE=multi`
-- Retains all loaded crop adapters simultaneously in VRAM using PEFT multi-adapter routing.
-- Fast switching via `model.set_adapter(crop_name)`.
-- Recommended on GPUs with $\ge 24\text{ GB}$ VRAM (e.g. A100, RTX 4090).
+> [!WARNING]
+> **Training Data & Domain Limitations:**
+> While Qwen2.5-VL-3B supports general reasoning, the PEFT adapters were fine-tuned specifically on grounded disease classification and symptom attribution from the SAGE dataset. Custom prompts asking for extensive chemical dosage recommendations or off-domain assessments should be validated experimentally. Prediction outputs are always returned as generated by the model without fabricated probabilities.
 
 ---
 
-## Local Testing without Model Downloads (Mock Mode)
+## Primary API Endpoints & Request Parameters
 
-You can run and test the complete API pipeline locally **without a GPU or 3B model weights**:
+### 1. Primary Multimodal Endpoint: `POST /api/v1/predict`
+Accepts `multipart/form-data`:
 
-1. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   ```
-2. Enable mock mode in `.env`:
-   ```ini
-   MOCK_INFERENCE=true
-   ```
-3. Run the test suite:
-   ```bash
-   python -m unittest discover tests
-   ```
-
----
-
-## Kaggle Deployment Guide (Primary Target)
-
-Kaggle Notebooks provide free access to NVIDIA Tesla T4 or P100 GPUs (15–16 GB VRAM).
-
-### Quick Steps:
-1. Open a new Kaggle Notebook: **Kaggle -> Create -> New Notebook**.
-2. Change Accelerator: **Settings (Right panel) -> Accelerator -> GPU T4 x2 or GPU P100**.
-3. Turn on Internet: **Settings -> Internet -> On**.
-4. Configure Kaggle Secrets:
-   - Click **Add-ons -> Secrets**.
-   - Label: `HF_TOKEN`, Value: Your Hugging Face user access token.
-5. Clone and launch from the provided notebook:
-   - Upload or paste cells from [`notebooks/kaggle_deployment.ipynb`](file:///c:/Projects/Sage-backend/notebooks/kaggle_deployment.ipynb).
-
-### Notebook Pipeline Execution:
-- **CELL 1**: Installs requirements and downloads `cloudflared`.
-- **CELL 2**: Clones repository into `/kaggle/working/Sage-backend`.
-- **CELL 3**: Loads `HF_TOKEN` from Kaggle Secrets.
-- **CELL 4**: Checks GPU availability and detects BF16/FP16 precision.
-- **CELL 5**: Runs `python scripts/verify_checkpoints.py` to validate all 5 crop adapters on HF Hub.
-- **CELL 6**: Inspects SafeTensors files and PEFT configurations.
-- **CELL 7**: Loads `Qwen/Qwen2.5-VL-3B-Instruct` into GPU memory.
-- **CELL 8**: Attaches initial adapter (`tomato_lora`).
-- **CELL 9**: Runs local in-notebook smoke test with sample leaf image.
-- **CELL 10**: Launches FastAPI server in background on port `8000`.
-- **CELL 11**: Starts Cloudflare Tunnel (`cloudflared tunnel --url http://localhost:8000`).
-- **CELL 12**: Prints public URL (e.g. `https://xxxx.trycloudflare.com`) and runs live curl verification.
-
-> **Dynamic Tunnel Note:** Cloudflare Tunnel assigns a temporary secure public URL. When a Kaggle session stops or restarts, a new URL is generated.
-
----
-
-## Google Colab Deployment Guide
-
-1. Open Google Colab and set runtime: **Runtime -> Change runtime type -> T4 GPU**.
-2. Open [`notebooks/colab_deployment.ipynb`](file:///c:/Projects/Sage-backend/notebooks/colab_deployment.ipynb).
-3. Set your secret token in **Secrets (Key icon on left) -> `HF_TOKEN`**.
-4. Run all cells. The Cloudflare Tunnel URL will be printed at the end.
-
----
-
-## REST API Documentation & Endpoints
-
-Interactive Swagger UI: `https://YOUR-TUNNEL-URL/docs`  
-OpenAPI Specification: `https://YOUR-TUNNEL-URL/openapi.json`
-
-### Endpoints Overview
-
-| Method | Endpoint | Description | Auth |
+| Parameter | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | Service health, device type, base model status | Public |
-| `GET` | `/api/v1/crops` | List of supported crops, checkpoints, status | Optional API Key |
-| `GET` | `/api/v1/model/status` | Active base model, active adapter, VRAM usage | Optional API Key |
-| `POST` | `/api/v1/predict/{crop}` | Diagnose plant leaf from image (crop in path) | Optional API Key |
-| `POST` | `/api/v1/predict` | Diagnose plant leaf from image (crop in form) | Optional API Key |
-| `POST` | `/api/v1/predict/batch` | Batch sequential diagnosis for multiple images | Optional API Key |
+| `crop` | Form String | **Yes** | Target crop (`corn`, `rice`, `soybean`, `tomato`, `wheat`) |
+| `image` | UploadFile | **Yes** | Leaf/plant image file (JPEG, PNG, WebP) |
+| `prompt` | Form String | **No** | Custom instruction. If omitted, uses crop default prompt. |
+| `max_new_tokens`| Form Int | No | Max tokens to generate (default: 256) |
+| `temperature` | Form Float | No | Sampling temperature (default: 0.0 deterministic) |
+
+### 2. Path-based Convenience Endpoint: `POST /api/v1/predict/{crop}`
+Accepts `image` file and optional `prompt` as form field.
+
+### 3. Sequential Batch Endpoint: `POST /api/v1/predict/batch`
+Accepts `crop`, multiple `images`, and optional common `prompt`.
+
+### 4. System Endpoints:
+- `GET /health`: Operational status and base model state.
+- `GET /api/v1/crops`: List of supported crops, default prompts, and loading status.
+- `GET /api/v1/model/status`: Active base model, active adapter, and GPU VRAM consumption.
 
 ---
 
-## Working cURL Examples
+## Structured JSON Response Format
 
-Replace `https://YOUR-TUNNEL-URL` with your live Cloudflare Tunnel URL.
-
-### 1. Health Check
-```bash
-curl -X GET "https://YOUR-TUNNEL-URL/health"
-```
-**Response:**
-```json
-{
-  "status": "healthy",
-  "service": "SAGE API",
-  "device": "cuda",
-  "base_model_loaded": true,
-  "active_crop": "tomato"
-}
-```
-
-### 2. List Available Crops
-```bash
-curl -X GET "https://YOUR-TUNNEL-URL/api/v1/crops"
-```
-
-### 3. Diagnose Crop via URL Path (`/predict/{crop}`)
-```bash
-curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict/tomato" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -F "image=@tomato_early_blight.jpg"
-```
-**Response:**
 ```json
 {
   "success": true,
   "crop": "tomato",
-  "model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "base_model": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "active_adapter": "tomato",
   "checkpoint": "tomato/checkpoints/checkpoint-step-600",
+  "input": {
+    "prompt": "Identify the disease visible in this tomato leaf image. Use the disease classes supported by the tomato model. Provide the predicted disease and a concise explanation of the visible symptoms."
+  },
   "prediction": {
+    "response": "Crop: Tomato\nDiagnosis: Early Blight\nDisease type: Fungal\nPlant organ: Foliar\nVisual symptoms: Concentric dark brown rings with target-like appearance.\nPathogen: Alternaria solani",
     "class_name": "Early Blight",
     "crop": "Tomato",
     "disease_type": "Fungal",
     "plant_organ": "Foliar",
-    "visual_symptoms": "Concentric dark brown target-like rings with chlorotic halo around leaf spots.",
+    "visual_symptoms": "Concentric dark brown rings with target-like appearance.",
     "pathogen": "Alternaria solani",
     "matched_taxonomy_class": "Early_Blight",
     "is_canonical_match": true
   },
-  "raw_output": "Crop: Tomato\nDiagnosis: Early Blight\nDisease type: Fungal\nPlant organ: Foliar\nVisual symptoms: Concentric dark brown target-like rings with chlorotic halo around leaf spots.\nPathogen: Alternaria solani",
-  "inference_time_seconds": 1.84,
+  "raw_output": "Crop: Tomato\nDiagnosis: Early Blight\nDisease type: Fungal\nPlant organ: Foliar\nVisual symptoms: Concentric dark brown rings with target-like appearance.\nPathogen: Alternaria solani",
+  "inference_time_seconds": 2.14,
   "image_metadata": {
     "width": 1024,
     "height": 768,
@@ -309,103 +150,131 @@ curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict/tomato" \
 }
 ```
 
-### 4. Diagnose Crop via Form Field (`/predict`)
+---
+
+## Working cURL Examples
+
+Replace `https://YOUR-TUNNEL-URL` with your active Cloudflare Tunnel URL.
+
+### 1. Multimodal Prediction with Default Prompt (Omitted prompt)
 ```bash
 curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -F "crop=corn" \
-  -F "image=@corn_leaf.jpg"
+  -F "crop=tomato" \
+  -F "image=@tomato_leaf.jpg"
 ```
 
-### 5. Sequential Batch Diagnosis (`/predict/batch`)
+### 2. Multimodal Prediction with Custom Prompt
 ```bash
-curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict/batch" \
+curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict" \
   -H "Authorization: Bearer YOUR_API_KEY" \
-  -F "crop=rice" \
-  -F "images=@rice_leaf_01.jpg" \
-  -F "images=@rice_leaf_02.jpg"
+  -F "crop=tomato" \
+  -F "image=@tomato_leaf.jpg" \
+  -F "prompt=Identify the disease affecting this tomato leaf and describe the visible concentric ring lesions."
+```
+
+### 3. Diagnose via Path Convenience
+```bash
+curl -X POST "https://YOUR-TUNNEL-URL/api/v1/predict/corn" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -F "image=@corn_blight.jpg" \
+  -F "prompt=Identify any fungal or bacterial disease present."
 ```
 
 ---
 
 ## n8n Workflow Integration
 
-To integrate SAGE into an autonomous agricultural pipeline in **n8n**:
+To integrate SAGE into an automated agricultural workflow in **n8n**:
 
-1. **Add an HTTP Request Node**:
+1. **HTTP Request Node**:
    - **Method**: `POST`
-   - **URL**: `https://YOUR-TUNNEL-URL/api/v1/predict/tomato`
-   - **Authentication**: Generic Credential Type -> Header Auth:
-     - Name: `Authorization`
-     - Value: `Bearer {{ $node["Config"].json["SAGE_API_KEY"] }}`
-   - **Send Body**: `True`
+   - **URL**: `https://YOUR-TUNNEL-URL/api/v1/predict`
+   - **Authentication**: Header Auth (`Authorization: Bearer YOUR_API_KEY`)
    - **Body Content Type**: `Form-Data (multipart/form-data)`
    - **Form Fields**:
-     - Mode: `n8n Form Data`
-     - Parameter Type: `Binary Data`
-     - Parameter Name: `image`
-     - Input Data Field Name: `data`
-2. **Add a Code / Switch Node**:
-   - Route downstream alerts (e.g. WhatsApp / Email / Telegram to farmers) when `json.prediction.class_name != "Healthy"`.
+     - `crop` (Text): `{{ $json.crop_name }}`
+     - `prompt` (Text, optional): `{{ $json.user_question || '' }}`
+     - `image` (Binary Data): `data`
+2. **Switch Node**:
+   - Condition: `{{ $json.prediction.class_name }} != "Healthy"` -> Route automated advisory alert to farmers via Telegram, SMS, or WhatsApp.
 
 ---
 
-## External App Integration (Python & JavaScript)
+## External Application Integration
 
 ### Python Example
 ```python
 import requests
 
-API_URL = "https://YOUR-TUNNEL-URL/api/v1/predict/tomato"
+API_URL = "https://YOUR-TUNNEL-URL/api/v1/predict"
 HEADERS = {"Authorization": "Bearer YOUR_API_KEY"}
 
-with open("sample_leaf.jpg", "rb") as img:
-    response = requests.post(API_URL, headers=HEADERS, files={"image": img})
+files = {"image": open("leaf.jpg", "rb")}
+data = {
+    "crop": "wheat",
+    "prompt": "Identify any symptoms of stripe rust on this wheat leaf."
+}
 
-data = response.json()
-print("Diagnosis:", data["prediction"]["class_name"])
-print("Pathogen:", data["prediction"]["pathogen"])
-print("Latency:", data["inference_time_seconds"], "s")
+response = requests.post(API_URL, headers=HEADERS, data=data, files=files)
+result = response.json()
+print("Model Response:\n", result["prediction"]["response"])
 ```
 
-### JavaScript / TypeScript Example
+### TypeScript / JavaScript Example
 ```typescript
 const formData = new FormData();
+formData.append("crop", "soybean");
 formData.append("image", fileInput.files[0]);
+formData.append("prompt", "Assess the visible symptoms and diagnose any condition.");
 
-const response = await fetch("https://YOUR-TUNNEL-URL/api/v1/predict/soybean", {
+const response = await fetch("https://YOUR-TUNNEL-URL/api/v1/predict", {
   method: "POST",
-  headers: {
-    "Authorization": "Bearer YOUR_API_KEY",
-  },
+  headers: { "Authorization": "Bearer YOUR_API_KEY" },
   body: formData,
 });
-
 const result = await response.json();
-console.log(result.prediction);
+console.log(result.prediction.response);
 ```
 
 ---
 
-## GPU Memory & Performance Optimization
+## Adapter Switching & Concurrency Synchronization
 
-| Metric | Tesla T4 (15 GB VRAM) | P100 (16 GB VRAM) |
-| :--- | :--- | :--- |
-| **Base Model (FP16/BF16)** | ~6.8 GB | ~6.8 GB |
-| **Single Crop Adapter** | ~0.15 GB | ~0.15 GB |
-| **Inference Activation Peak** | ~0.8 – 1.2 GB | ~0.8 – 1.2 GB |
-| **Total VRAM Headroom** | **~6.8 GB Free** | **~7.8 GB Free** |
-| **Average Latency** | 1.8 – 2.5 seconds | 1.4 – 2.0 seconds |
+- **Persistent Base Model**: The 3B vision-language model stays loaded in VRAM.
+- **Dynamic Adapter Switching**: When switching between crops (e.g. `corn` to `tomato`), the previous adapter is detached and the requested PEFT LoRA adapter is attached.
+- **Asynchronous & Thread-Safe Lock**: Protected with `asyncio.Lock` and thread-level mutexes so that concurrent API requests for different crops cannot interleave adapter state or produce corrupted inferences.
 
 ---
 
-## Troubleshooting & Common Errors
+## Kaggle & Colab Deployment Guides
 
-| Error | Root Cause | Solution |
-| :--- | :--- | :--- |
-| `CUDA out of memory` | VRAM exhausted during large batch generation | Keep `ADAPTER_MODE=single`. Images in batch requests are automatically processed sequentially. |
-| `Repository not found or access denied` | Private Hugging Face repo without valid token | Set `HF_TOKEN` in Kaggle Secrets or `.env`. Ensure token has Read permissions. |
-| `Unsupported image type` | Uploaded image format is not supported | Supported formats: JPEG, PNG, WebP, BMP, TIFF. |
-| `413 Request Entity Too Large` | Image file exceeds `MAX_IMAGE_SIZE_MB` (default: 10MB) | Compress image or increase `MAX_IMAGE_SIZE_MB` in `.env`. |
-| `Tunnel connection refused / 502` | Server has not finished loading base model | Check `/health` endpoint to ensure `base_model_loaded: true` before sending prediction traffic. |
+Deployment notebooks are pre-built in [`notebooks/`](file:///c:/Projects/Sage-backend/notebooks/):
+- **Kaggle**: [`notebooks/kaggle_deployment.ipynb`](file:///c:/Projects/Sage-backend/notebooks/kaggle_deployment.ipynb)
+- **Google Colab**: [`notebooks/colab_deployment.ipynb`](file:///c:/Projects/Sage-backend/notebooks/colab_deployment.ipynb)
 
+Both notebooks configure GPU acceleration, authenticate with Hugging Face (`HF_TOKEN`), start the FastAPI server, and expose the multimodal endpoints via Cloudflare Tunnel.
+
+---
+
+## Testing & Mock Mode
+
+Test the entire multimodal API locally without a GPU or downloading weights:
+```bash
+# In .env set:
+MOCK_INFERENCE=true
+
+# Run unit tests:
+python -m unittest discover tests
+```
+The test suite covers:
+- Missing crop rejection
+- Invalid crop handling
+- Missing image validation
+- Default prompt fallback
+- Custom prompt acceptance
+- Correct crop-to-adapter mapping
+- Image preprocessing
+- Multimodal message structure
+- Mock inference output
+- API schema serialization

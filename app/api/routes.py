@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/v1", tags=["Inference & Diagnostics"])
     "/crops",
     response_model=CropListResponse,
     summary="List Supported Crops",
-    description="Retrieve all supported crops, Hugging Face checkpoint subpaths, and current loading state.",
+    description="Retrieve all supported crops, Hugging Face checkpoint subpaths, default prompts, and current loading state.",
 )
 async def list_available_crops(
     service: PredictionService = Depends(get_prediction_service),
@@ -58,7 +58,7 @@ async def get_model_status(
 
 
 @router.post(
-    "/predict/{crop}",
+    "/predict",
     response_model=PredictionResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Validation or crop error"},
@@ -66,24 +66,33 @@ async def get_model_status(
         415: {"model": ErrorResponse, "description": "Unsupported media format"},
         422: {"model": ErrorResponse, "description": "Corrupted or unreadable image"},
     },
-    summary="Diagnose Plant Disease by Crop Path",
-    description="Upload an image and specify crop name in the URL path (corn, rice, soybean, tomato, wheat).",
+    summary="Multimodal Plant Disease Diagnosis (Primary Endpoint)",
+    description=(
+        "Execute multimodal visual AI diagnosis. Accepts a target crop name (corn, rice, soybean, tomato, wheat), "
+        "a leaf/plant image, and an optional custom prompt or instruction. "
+        "If prompt is omitted, a fine-tuned default crop disease identification prompt is automatically applied."
+    ),
 )
-async def predict_by_crop_path(
-    crop: str = Path(..., description="Target crop identifier (corn, rice, soybean, tomato, wheat)"),
-    image: UploadFile = File(..., description="Crop leaf or plant image file"),
-    max_new_tokens: Optional[int] = Query(default=None, description="Max tokens to generate"),
-    temperature: Optional[float] = Query(default=None, description="Generation temperature (0.0 for deterministic)"),
+async def predict_multimodal(
+    crop: str = Form(..., description="Target crop identifier (corn, rice, soybean, tomato, wheat)"),
+    image: UploadFile = File(..., description="Plant or leaf image file (JPEG, PNG, WebP)"),
+    prompt: Optional[str] = Form(
+        default=None,
+        description="Optional prompt/instruction for Qwen2.5-VL. If omitted, uses default crop prompt.",
+    ),
+    max_new_tokens: Optional[int] = Form(default=None, description="Max new tokens to generate (default: 256)"),
+    temperature: Optional[float] = Form(default=None, description="Generation temperature (default: 0.0 deterministic)"),
     service: PredictionService = Depends(get_prediction_service),
     _auth: bool = Depends(verify_api_key),
 ) -> PredictionResponse:
-    """Run visual disease diagnosis with crop specified in URL path."""
+    """Primary multimodal inference endpoint accepting crop, image, and optional prompt."""
     image_bytes = await validate_image_file(image)
 
     try:
-        result = service.predict_single(
+        result = await service.predict_single_async(
             crop=crop,
             image_bytes=image_bytes,
+            prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
@@ -100,31 +109,37 @@ async def predict_by_crop_path(
 
 
 @router.post(
-    "/predict",
+    "/predict/{crop}",
     response_model=PredictionResponse,
     responses={
         400: {"model": ErrorResponse, "description": "Validation or crop error"},
         413: {"model": ErrorResponse, "description": "Image payload too large"},
         415: {"model": ErrorResponse, "description": "Unsupported media format"},
+        422: {"model": ErrorResponse, "description": "Corrupted or unreadable image"},
     },
-    summary="Diagnose Plant Disease by Form Crop",
-    description="Upload an image and specify the crop identifier as a multipart form field.",
+    summary="Diagnose Plant Disease by Crop Path Parameter",
+    description="Convenience route accepting the crop name in the URL path, with optional prompt as form parameter.",
 )
-async def predict_by_crop_form(
-    crop: str = Form(..., description="Target crop identifier (corn, rice, soybean, tomato, wheat)"),
+async def predict_by_crop_path(
+    crop: str = Path(..., description="Target crop identifier (corn, rice, soybean, tomato, wheat)"),
     image: UploadFile = File(..., description="Crop leaf or plant image file"),
+    prompt: Optional[str] = Form(
+        default=None,
+        description="Optional custom prompt or instruction. If omitted, uses default crop prompt.",
+    ),
     max_new_tokens: Optional[int] = Form(default=None, description="Max tokens to generate"),
     temperature: Optional[float] = Form(default=None, description="Generation temperature"),
     service: PredictionService = Depends(get_prediction_service),
     _auth: bool = Depends(verify_api_key),
 ) -> PredictionResponse:
-    """Run visual disease diagnosis with crop specified in form field."""
+    """Multimodal disease diagnosis with crop specified in URL path."""
     image_bytes = await validate_image_file(image)
 
     try:
-        result = service.predict_single(
+        result = await service.predict_single_async(
             crop=crop,
             image_bytes=image_bytes,
+            prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
@@ -144,11 +159,15 @@ async def predict_by_crop_form(
     "/predict/batch",
     response_model=BatchPredictionResponse,
     summary="Sequential Batch Plant Disease Diagnosis",
-    description="Submit multiple images for a single crop. Images are processed sequentially to prevent GPU OOM.",
+    description="Submit multiple images for a single crop and optional prompt. Images are processed sequentially to prevent GPU OOM.",
 )
 async def predict_batch(
     crop: str = Form(..., description="Target crop identifier for this batch"),
     images: List[UploadFile] = File(..., description="List of crop images to diagnose"),
+    prompt: Optional[str] = Form(
+        default=None,
+        description="Optional custom prompt applied across batch images. If omitted, uses default crop prompt.",
+    ),
     max_new_tokens: Optional[int] = Form(default=None, description="Max tokens to generate"),
     temperature: Optional[float] = Form(default=None, description="Generation temperature"),
     service: PredictionService = Depends(get_prediction_service),
@@ -164,17 +183,14 @@ async def predict_batch(
     # Validate and buffer each image
     buffered_images = []
     for img_file in images:
-        try:
-            raw_bytes = await validate_image_file(img_file)
-            buffered_images.append((img_file.filename or "uploaded_image.jpg", raw_bytes))
-        except HTTPException as e:
-            # We fail early if an invalid file format or oversized file is provided
-            raise e
+        raw_bytes = await validate_image_file(img_file)
+        buffered_images.append((img_file.filename or "uploaded_image.jpg", raw_bytes))
 
     try:
         summary = service.predict_batch(
             crop=crop,
             images=buffered_images,
+            prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
@@ -187,4 +203,3 @@ async def predict_batch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Batch execution failed: {str(e)}",
         )
-

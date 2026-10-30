@@ -18,6 +18,7 @@ class CropConfig(BaseModel):
     checkpoint_subpath: str
     model_type: str = "peft_lora"
     adapter_name: str
+    default_prompt: str
     prompt_template: str
     known_classes: List[str] = Field(default_factory=list)
     loading_status: str = "unloaded"  # "unloaded", "loading", "active", "cached", "error"
@@ -51,6 +52,13 @@ class CropRegistry:
             self.crops.clear()
             for crop_id, crop_info in crops_data.items():
                 normalized_id = crop_id.lower().strip()
+                default_prompt = crop_info.get(
+                    "default_prompt",
+                    crop_info.get(
+                        "prompt_template",
+                        f"Identify the disease visible in this {normalized_id} leaf image. Use the disease classes supported by the {normalized_id} model. Provide the predicted disease and a concise explanation of the visible symptoms.",
+                    ),
+                )
                 self.crops[normalized_id] = CropConfig(
                     crop_id=normalized_id,
                     display_name=crop_info.get("display_name", normalized_id.capitalize()),
@@ -58,10 +66,8 @@ class CropRegistry:
                     checkpoint_subpath=crop_info.get("checkpoint_subpath", ""),
                     model_type=crop_info.get("model_type", "peft_lora"),
                     adapter_name=crop_info.get("adapter_name", f"{normalized_id}_lora"),
-                    prompt_template=crop_info.get(
-                        "prompt_template",
-                        f"Analyze this image of a {normalized_id} plant and provide diagnosis details.",
-                    ),
+                    default_prompt=default_prompt,
+                    prompt_template=default_prompt,
                     known_classes=crop_info.get("known_classes", []),
                     loading_status="unloaded",
                 )
@@ -83,6 +89,11 @@ class CropRegistry:
             raise ValueError(f"Crop '{crop_id}' is not supported. Supported crops are: {supported}")
         return self.crops[crop_id_norm]
 
+    def get_default_prompt(self, crop_id: str) -> str:
+        """Retrieve configured default prompt for a given crop."""
+        crop = self.validate_crop(crop_id)
+        return crop.default_prompt
+
     def list_crop_ids(self) -> List[str]:
         """Return list of all supported crop IDs."""
         return sorted(list(self.crops.keys()))
@@ -101,4 +112,3 @@ class CropRegistry:
 
 # Global singleton crop registry instance
 crop_registry = CropRegistry()
-

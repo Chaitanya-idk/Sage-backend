@@ -14,6 +14,7 @@ class BatchItemResult(BaseModel):
 
     filename: str
     success: bool
+    input: Optional[Dict[str, Any]] = None
     prediction: Optional[Dict[str, Any]] = None
     raw_output: Optional[str] = None
     inference_time_seconds: Optional[float] = None
@@ -39,7 +40,7 @@ class PredictionService:
         self.model_manager = get_model_manager()
 
     def get_crops_overview(self) -> Dict[str, Any]:
-        """Retrieve list of crops and their metadata."""
+        """Retrieve list of crops, default prompts, and their metadata."""
         crops = crop_registry.get_all_crops()
         crop_list = []
         for cid, cfg in crops.items():
@@ -50,6 +51,7 @@ class PredictionService:
                 "checkpoint_subpath": cfg.checkpoint_subpath,
                 "model_type": cfg.model_type,
                 "adapter_name": cfg.adapter_name,
+                "default_prompt": cfg.default_prompt,
                 "loading_status": cfg.loading_status,
                 "classes_count": len(cfg.known_classes),
                 "known_classes": cfg.known_classes,
@@ -69,15 +71,38 @@ class PredictionService:
         self,
         crop: str,
         image_bytes: bytes,
+        prompt: Optional[str] = None,
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         repetition_penalty: Optional[float] = None,
     ) -> PredictionResult:
-        """Run single image diagnosis."""
+        """Run single image diagnosis synchronously."""
         return self.predictor.predict(
             crop_id=crop,
             image_bytes=image_bytes,
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            repetition_penalty=repetition_penalty,
+        )
+
+    async def predict_single_async(
+        self,
+        crop: str,
+        image_bytes: bytes,
+        prompt: Optional[str] = None,
+        max_new_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        repetition_penalty: Optional[float] = None,
+    ) -> PredictionResult:
+        """Run single image diagnosis with async lock synchronization."""
+        return await self.predictor.predict_async(
+            crop_id=crop,
+            image_bytes=image_bytes,
+            prompt=prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
@@ -88,6 +113,7 @@ class PredictionService:
         self,
         crop: str,
         images: List[Tuple[str, bytes]],
+        prompt: Optional[str] = None,
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
     ) -> BatchPredictionSummary:
@@ -109,6 +135,7 @@ class PredictionService:
                 res = self.predictor.predict(
                     crop_id=crop,
                     image_bytes=img_bytes,
+                    prompt=prompt,
                     max_new_tokens=max_new_tokens,
                     temperature=temperature,
                 )
@@ -117,6 +144,7 @@ class PredictionService:
                     BatchItemResult(
                         filename=filename,
                         success=True,
+                        input=res.input.model_dump(),
                         prediction=res.prediction.model_dump(),
                         raw_output=res.raw_output,
                         inference_time_seconds=res.inference_time_seconds,
@@ -155,4 +183,3 @@ def get_prediction_service() -> PredictionService:
     if _service_instance is None:
         _service_instance = PredictionService()
     return _service_instance
-

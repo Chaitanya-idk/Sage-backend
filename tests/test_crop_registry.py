@@ -9,7 +9,7 @@ from app.models.crop_registry import CropRegistry, CropConfig
 
 
 class TestCropRegistry(unittest.TestCase):
-    """Test Crop Registry mapping, validation, and loading status tracking."""
+    """Test Crop Registry mapping, validation, default prompts, and loading status tracking."""
 
     def setUp(self):
         config_path = os.path.join(os.path.dirname(__file__), "..", "configs", "crops.yaml")
@@ -44,6 +44,13 @@ class TestCropRegistry(unittest.TestCase):
                 f"Mismatch for {crop_id}: expected {expected_subpath}, got {crop.checkpoint_subpath}",
             )
 
+    def test_default_prompts_configured(self):
+        """Verify each crop has a tailored default prompt."""
+        for crop_id in self.registry.list_crop_ids():
+            prompt = self.registry.get_default_prompt(crop_id)
+            self.assertTrue(bool(prompt and prompt.strip()))
+            self.assertIn(crop_id, prompt.lower())
+
     def test_crop_validation_valid(self):
         """Test valid crop validation case insensitivity."""
         c = self.registry.validate_crop("TOMATO")
@@ -68,4 +75,3 @@ class TestCropRegistry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

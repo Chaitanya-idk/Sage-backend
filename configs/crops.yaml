@@ -1,5 +1,5 @@
 # SAGE Crop Registry Configuration
-# Single Source of Truth for Crop Checkpoints & Taxonomy
+# Single Source of Truth for Crop Checkpoints, Multimodal Default Prompts & Taxonomy
 default_hf_repo: "IDK-Chaitanya/SAGE5Class-cp"
 base_model: "Qwen/Qwen2.5-VL-3B-Instruct"
 
@@ -10,7 +10,8 @@ crops:
     checkpoint_subpath: "corn_5ep/checkpoints/checkpoint-step-1000"
     model_type: "peft_lora"
     adapter_name: "corn_lora"
-    prompt_template: "Analyze this image of a corn plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    default_prompt: "Identify the disease visible in this corn leaf image. Use the disease classes supported by the corn model. Provide the predicted disease and a concise explanation of the visible symptoms."
+    prompt_template: "Identify the disease visible in this corn leaf image. Use the disease classes supported by the corn model. Provide the predicted disease and a concise explanation of the visible symptoms."
     known_classes:
       - "Bacterial_Rot_And_Blight"
       - "Common_Rust"
@@ -28,7 +29,8 @@ crops:
     checkpoint_subpath: "rice/checkpoints/checkpoint-step-600"
     model_type: "peft_lora"
     adapter_name: "rice_lora"
-    prompt_template: "Analyze this image of a rice plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    default_prompt: "Identify the disease visible in this rice leaf image. Use the disease classes supported by the rice model. Provide the predicted disease and a concise explanation of the visible symptoms."
+    prompt_template: "Identify the disease visible in this rice leaf image. Use the disease classes supported by the rice model. Provide the predicted disease and a concise explanation of the visible symptoms."
     known_classes:
       - "Bacterial_Leaf_Blight"
       - "Blast"
@@ -42,7 +44,8 @@ crops:
     checkpoint_subpath: "soybean_5ep/checkpoints/checkpoint-step-1000"
     model_type: "peft_lora"
     adapter_name: "soybean_lora"
-    prompt_template: "Analyze this image of a soybean plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    default_prompt: "Identify the disease visible in this soybean leaf image. Use the disease classes supported by the soybean model. Provide the predicted disease and a concise explanation of the visible symptoms."
+    prompt_template: "Identify the disease visible in this soybean leaf image. Use the disease classes supported by the soybean model. Provide the predicted disease and a concise explanation of the visible symptoms."
     known_classes:
       - "Bacterial_Blight"
       - "Bacterial_Pustule"
@@ -60,7 +63,8 @@ crops:
     checkpoint_subpath: "tomato/checkpoints/checkpoint-step-600"
     model_type: "peft_lora"
     adapter_name: "tomato_lora"
-    prompt_template: "Analyze this image of a tomato plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    default_prompt: "Identify the disease visible in this tomato leaf image. Use the disease classes supported by the tomato model. Provide the predicted disease and a concise explanation of the visible symptoms."
+    prompt_template: "Identify the disease visible in this tomato leaf image. Use the disease classes supported by the tomato model. Provide the predicted disease and a concise explanation of the visible symptoms."
     known_classes:
       - "Bacterial_Leaf_Spot"
       - "Early_Blight"
@@ -78,11 +82,11 @@ crops:
     checkpoint_subpath: "wheat/checkpoints/checkpoint-step-500"
     model_type: "peft_lora"
     adapter_name: "wheat_lora"
-    prompt_template: "Analyze this image of a wheat plant. Identify any crop disease, symptoms, affected plant organ, and pathogen."
+    default_prompt: "Identify the disease visible in this wheat leaf image. Use the disease classes supported by the wheat model. Provide the predicted disease and a concise explanation of the visible symptoms."
+    prompt_template: "Identify the disease visible in this wheat leaf image. Use the disease classes supported by the wheat model. Provide the predicted disease and a concise explanation of the visible symptoms."
     known_classes:
       - "Root_Rot"
       - "Rust"
       - "Septoria_Leaf_Blotch"
       - "Smut"
       - "Healthy"
-

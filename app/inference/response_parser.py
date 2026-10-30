@@ -10,7 +10,8 @@ logger = get_logger("sage.response_parser")
 class ParsedPrediction(BaseModel):
     """Structured result parsed directly from the model's generated response."""
 
-    class_name: str = Field(description="Primary diagnosed disease name or condition")
+    response: str = Field(description="Actual model-generated response text")
+    class_name: Optional[str] = Field(default=None, description="Primary diagnosed disease name or condition")
     crop: Optional[str] = None
     disease_type: Optional[str] = None
     plant_organ: Optional[str] = None
@@ -37,8 +38,10 @@ class ResponseParser:
     @classmethod
     def parse(cls, raw_text: str, crop_name: str, known_classes: Optional[List[str]] = None) -> ParsedPrediction:
         """Parse raw model output text into structured SAGE prediction fields."""
-        if not raw_text or not raw_text.strip():
+        cleaned_text = (raw_text or "").strip()
+        if not cleaned_text:
             return ParsedPrediction(
+                response="",
                 class_name="Unknown",
                 crop=crop_name,
                 is_canonical_match=False,
@@ -46,21 +49,20 @@ class ResponseParser:
 
         extracted: Dict[str, str] = {}
         for key, pattern in cls.PATTERNS.items():
-            match = pattern.search(raw_text)
+            match = pattern.search(cleaned_text)
             if match:
                 extracted[key] = match.group(1).strip()
 
         # Determine class_name
         class_name = extracted.get("diagnosis")
         if not class_name:
-            # Fallback: check if the first non-empty line contains a diagnosis or class
-            lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
+            lines = [l.strip() for l in cleaned_text.splitlines() if l.strip()]
             if lines:
                 class_name = lines[0]
             else:
                 class_name = "Unknown"
 
-        # Clean any trailing punctuation or markdown artifacts
+        # Clean trailing markdown/punctuation
         class_name = class_name.strip(" *#-_`\"'")
 
         # Taxonomy matching against known classes
@@ -77,6 +79,7 @@ class ResponseParser:
                     break
 
         return ParsedPrediction(
+            response=cleaned_text,
             class_name=class_name,
             crop=extracted.get("crop", crop_name),
             disease_type=extracted.get("disease_type"),
@@ -87,4 +90,3 @@ class ResponseParser:
             is_canonical_match=is_canonical,
             attributes=extracted,
         )
-

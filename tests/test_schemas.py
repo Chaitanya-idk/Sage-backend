@@ -10,7 +10,8 @@ from app.api.schemas import (
     CropListResponse,
     ModelStatusResponse,
     PredictionResponse,
-    PredictionDiagnosis,
+    PredictionInputInfo,
+    PredictionOutputInfo,
 )
 from app.inference.response_parser import ResponseParser
 
@@ -45,6 +46,7 @@ class TestSchemasAndParser(unittest.TestCase):
         known = ["Early_Blight", "Late_Blight", "Healthy"]
         parsed = ResponseParser.parse(raw_text, crop_name="Tomato", known_classes=known)
 
+        self.assertEqual(parsed.response, raw_text)
         self.assertEqual(parsed.class_name, "Early Blight")
         self.assertEqual(parsed.crop, "Tomato")
         self.assertEqual(parsed.disease_type, "Fungal")
@@ -57,33 +59,42 @@ class TestSchemasAndParser(unittest.TestCase):
         """Test parser behavior on plain text output without explicit keys."""
         raw_text = "Powdery Mildew visible on the leaf surface."
         parsed = ResponseParser.parse(raw_text, crop_name="Wheat")
+        self.assertEqual(parsed.response, raw_text)
         self.assertEqual(parsed.class_name, "Powdery Mildew visible on the leaf surface.")
         self.assertEqual(parsed.crop, "Wheat")
         self.assertFalse(parsed.is_canonical_match)
 
-    def test_prediction_response_schema(self):
-        """Test full PredictionResponse structure."""
-        diag = PredictionDiagnosis(
+    def test_multimodal_prediction_response_schema(self):
+        """Test full PredictionResponse structure with multimodal input and output."""
+        output_info = PredictionOutputInfo(
+            response="Diagnosed Early Blight with visible target spots.",
             class_name="Early Blight",
             crop="tomato",
             disease_type="Fungal",
             matched_taxonomy_class="Early_Blight",
             is_canonical_match=True,
         )
+        input_info = PredictionInputInfo(
+            prompt="Identify the disease affecting this tomato leaf."
+        )
         resp = PredictionResponse(
             success=True,
             crop="tomato",
-            model="Qwen2.5-VL-3B-Instruct",
+            base_model="Qwen/Qwen2.5-VL-3B-Instruct",
+            active_adapter="tomato",
             checkpoint="tomato/checkpoints/checkpoint-step-600",
-            prediction=diag,
-            raw_output="Crop: Tomato\nDiagnosis: Early Blight",
+            input=input_info,
+            prediction=output_info,
+            raw_output="Diagnosed Early Blight with visible target spots.",
             inference_time_seconds=1.23,
         )
         self.assertTrue(resp.success)
         self.assertEqual(resp.crop, "tomato")
-        self.assertEqual(resp.prediction.class_name, "Early Blight")
+        self.assertEqual(resp.base_model, "Qwen/Qwen2.5-VL-3B-Instruct")
+        self.assertEqual(resp.active_adapter, "tomato")
+        self.assertEqual(resp.input.prompt, "Identify the disease affecting this tomato leaf.")
+        self.assertEqual(resp.prediction.response, "Diagnosed Early Blight with visible target spots.")
 
 
 if __name__ == "__main__":
     unittest.main()
-
